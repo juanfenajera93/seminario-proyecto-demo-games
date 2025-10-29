@@ -210,5 +210,3 @@ __marimo__/
 # ignorar datasets crudos
 data/
 
-# ignorar jupyters
-script_prueba/
