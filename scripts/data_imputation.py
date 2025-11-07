@@ -99,9 +99,3 @@ def imputacion_scores(df):
     
     return df_limpio
     
-    
-
-
-
-
-

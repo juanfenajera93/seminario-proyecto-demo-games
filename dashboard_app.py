@@ -1,33 +1,61 @@
 import streamlit as st
-import pandas as pd
 import plotly.express as px
+import requests
 
 # configuración de nuestra página
 st.set_page_config(layout="wide")
 
-# ruta de los datos
-DATA_PATH = r"C:\Users\fnaje\OneDrive\Documents\UniAndes\2do Seminario\seminario-proyecto-demo-games\data\processed\games_clean.csv"
+# las URLs 
+API_BASE_URL = "http://localhost:8000"
+API_URL_PREDICT = f"{API_BASE_URL}/ml/predict"
+API_URL_FILTROS = f"{API_BASE_URL}/eda/filters"
+API_URL_DATOS_EDA = f"{API_BASE_URL}/eda/data_specific_filters"
 
 # cargar datos
 @st.cache_data
-def cargar_datos(path):
-    """función para cargar datos con caché"""
-    return pd.read_csv(path)
-
-# datos cargados
-games_clean = cargar_datos(DATA_PATH)
+def cargar_opciones_filtros():
+    """llama a la API para obtener las opciones de los filtros"""
+    try:
+        response = requests.get(API_URL_FILTROS)
+        response.raise_for_status()
+        print("Filtros cargados desde la API")
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al cargar filtros desde la API: {e}")
+        return None
 
 
 # titulo
 st.title("🎮Dashboard de Videojuegos🎮")
-
-# para mostrar texto  con fuente pequeña
 st.caption("Seminario Complexivo de Titulación | UniAndes | Profesor: Juan Felipe Nájera")
-
 st.subheader("Análisis Exploratorio de Datos y Predicción de Ventas")
 
 # crear pestañas
 tab1, tab2 = st.tabs(["Análisis Exploratorio (EDA)", "Predicción de Ventas (ML)"])
+
+data_filtros = cargar_opciones_filtros()
+
+if data_filtros and "error" not in data_filtros:
+    generos_lista = data_filtros.get("generos", [])
+    min_year = data_filtros.get("min_year", 1980)
+    max_year = data_filtros.get("max_year", 2016)
+    
+    platform_options = data_filtros.get("platforms", [])
+    genre_options =  data_filtros.get("genre", [])
+    rating_options = data_filtros.get("ratings", [])
+    gen_platform_options = data_filtros.get("gen_platforms", [])
+    class_score_options = data_filtros.get("class_scores", [])
+
+else:
+    st.error("No se pudieron cargar los datos de los filtros desde la API")
+    generos_lista = []
+    min_year = 1980
+    max_year = 2016
+    platform_options = []
+    genre_options =  []
+    rating_options = []
+    gen_platform_options = []
+    class_score_options = []
 
 
 # PESTAÑA 1
@@ -38,9 +66,6 @@ with tab1:
     
     # filtro de géneros
     with col_filtro1:
-    
-        generos_lista = sorted(games_clean["genre"].unique())
-
         # selector 
         genero_seleccionado = st.multiselect(
             "Selecciona Géneros:", 
@@ -48,9 +73,6 @@ with tab1:
             default=generos_lista
         )
     with col_filtro2:
-        min_year = int(games_clean["year_of_release"].min())
-        max_year = int(games_clean["year_of_release"].max())
-        
         #st.slider
         rango_anios = st.slider(
             "Selecciona un rango de años:",
@@ -58,89 +80,68 @@ with tab1:
             max_value=max_year, 
             value=(min_year, max_year) # valor mínimo, valor máximo, default del ragno
         )
-    
-    # la lógica del filtro
-    # filtramos el df antes de calcular las métricas
-    # se puede seleccionar uno o varios generos
+        
     if genero_seleccionado:
-        # genero
-        filtro_genero = games_clean["genre"].isin(genero_seleccionado)
         
-        # rango de años seleccionado
-        filtro_anio = (games_clean["year_of_release"] >= rango_anios[0]) & (games_clean["year_of_release"] <= rango_anios[1])
+        params = {
+            "generos": genero_seleccionado, 
+            "anio_inicio": rango_anios[0],
+            "anio_fin": rango_anios[1] 
+        }
         
-        # filtro de ambos filtros
-        games_filtrado = games_clean[filtro_genero & filtro_anio]
-        
-    else:
-        # si no se selecciona ninguno, se crea un df vacío para evitar errores
-        games_filtrado = pd.DataFrame(columns=games_clean.columns)
+        try: 
+            response_datos = requests.get(API_URL_DATOS_EDA, params=params)
+            response_datos.raise_for_status()
+            data = response_datos.json()
+            
+            kpis = data.get("kpis", {})
+            datos_top_platforms = data.get("datos_top_platforms", [])
+            datos_treemap = data.get("datos_treemap", [])
+            datos_graf_ventas_totales = data.get("datos_graf_ventas_totales", [])
     
-    if not games_filtrado.empty:
-        # KPIs
-        # métricas para mostrar valores numéricos grandes
-        total_sales_global = games_filtrado["total_sales"].sum()
-        total_videogames = games_filtrado["videogame_names"].count()
-        total_platforms = games_filtrado["platform"].nunique()
-        avg_critic_score = games_filtrado["critic_score"].mean()
-        avg_user_score = games_filtrado["user_score"].mean()
-    else:
-        st.warning("No hay datos para los géneros seleccionados")
-        total_sales_global = 0
-        total_videogames = 0
-        total_platforms = 0
-        avg_critic_score = 0
-        avg_user_score = 0
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    # MÉTRICAS
-    with col1:
-        st.metric(
-            label="Ventas Globales (Millones)", 
-            value=f"$ {total_sales_global:,.0f} M"
-        )
-    with col2:
-        st.metric(
-            label="Total Videojuegos", 
-            value=f"{total_videogames}"
-        )
-    with col3:
-        st.metric(
-            label="Total Consolas", 
-            value=f"{total_platforms}"
-        )
-    with col4:
-        st.metric(
-            label="Puntaje Promedio de Críticos", 
-            value=f"{avg_critic_score:,.1f}"
-        )
-    with col5:
-        st.metric(
-            label="Puntaje Promedio de Usuarios", 
-            value=f"{avg_user_score:,.1f}"
-        )
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            # MÉTRICAS
+            with col1:
+                st.metric(
+                    label="Ventas Globales (Millones)", 
+                    value=kpis.get("total_sales_global", "N/A")
+                )
+            with col2:
+                st.metric(
+                    label="Total Videojuegos", 
+                    value=kpis.get("total_videogames", "N/A")
+                )
+            with col3:
+                st.metric(
+                    label="Total Consolas", 
+                    value=kpis.get("total_platforms", "N/A")
+                )
+            with col4:
+                st.metric(
+                    label="Puntaje Promedio de Críticos", 
+                    value=kpis.get("avg_critic_score", "N/A")
+                )
+            with col5:
+                st.metric(
+                    label="Puntaje Promedio de Usuarios", 
+                    value=kpis.get("avg_user_score", "N/A")
+                )
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error al cargar datos del EDA desde la API: {e}")
+            kpis = {}
+            datos_top_platforms = []
+            datos_treemap = []
+            datos_graf_ventas_totales = []
         
     st.markdown("---")
     
     # GRÁFICO VENTAS TOTALES POR REGIÓN
     st.subheader("Evolución de Ventas por Región")
     
-    # df de ventas por año por region
-    sales_per_region_df = games_clean.groupby("year_of_release")[
-        ["na_sales", "eu_sales", "jp_sales", "other_sales"]
-    ].sum().reset_index()
-    
-    # .melt transforma un df de "ancho" a "largo"
-    sales_per_region_melt_df = sales_per_region_df.melt(
-        id_vars="year_of_release", 
-        value_vars=["na_sales", "eu_sales", "jp_sales", "other_sales"], 
-        var_name="region", 
-        value_name="sales"
-    )
     
     fig_sales_per_region = px.line(
-        sales_per_region_melt_df, 
+        datos_graf_ventas_totales, 
         x = "year_of_release", 
         y = "sales",
         color="region", 
@@ -167,11 +168,8 @@ with tab1:
     
     with col_graf1:
     
-        # Gráfico de Barras #1
-        games_clean_platform = games_clean.groupby("platform")["total_sales"].sum().nlargest(10).reset_index()
-
         fig_bar_platform = px.bar(
-            games_clean_platform, 
+            datos_top_platforms, 
             x="platform",
             y="total_sales", 
             title="Top 10 Plataformas por Ventas Totales", 
@@ -191,18 +189,9 @@ with tab1:
     with col_graf2:
         st.write("##### Composición de Ventas por Región (%)")
         
-        total_na = games_filtrado["na_sales"].sum()
-        total_eu = games_filtrado["eu_sales"].sum()
-        total_jp = games_filtrado["jp_sales"].sum()
-        total_other = games_filtrado["other_sales"].sum()
-        
-        data_treemap = pd.DataFrame({
-            "region": ["Norteamérica", "Europa", "Japón", "Otras Regiones"], 
-            "ventas": [total_na, total_eu, total_jp, total_other]
-        })
         
         fig_treemap = px.treemap(
-            data_treemap, 
+            datos_treemap, 
             path=[px.Constant("Ventas Totales"), "region"], 
             values="ventas", 
             color="ventas", 
@@ -215,4 +204,70 @@ with tab1:
         
         st.plotly_chart(fig_treemap, use_container_width=True)
     
+# PESTAÑA 2
+with tab2:
+    st.header("Predicción de Ventas Globales")
+    st.write("Esta pestaña utiliza el modelo de ML cargado localmente para predecir las ventas")
+            
+    # dos nuevas columnas
+    col_inputs, col_resultado = st.columns(2)
     
+    with col_inputs:
+        st.subheader("Parámetros del Videojuego")
+        
+        with st.form("prediction_form"):
+            
+            # inputs categóricos
+            st.write("##### Características Categóricas")
+            platform = st.selectbox("Plataforma:", options=platform_options)
+            genre = st.selectbox("Género:", options=genre_options)
+            rating_esrb = st.selectbox("Clasificación ESRB:", options=rating_options)
+            gen_platform = st.selectbox("Generación de Plataformas:", options=gen_platform_options)
+            classification_user_score = st.selectbox("Clasificación de Usuarios:", options=class_score_options)
+            
+            # inputs numéricos
+            st.write("##### Catacterísticas Numéricas")
+            year_of_release = st.slider("Año de Lanzamiento:", 1980, 2016, 2010)
+            critic_score = st.slider("Puntaje de Crítica (0-100):", 0.0, 100.0, 80.0)
+            user_score = st.slider("Puntaje de Usuario (0-10):", 0.0, 10.0, 8.0, step=0.1)
+            
+            # botón de submit el form
+            submit_button = st.form_submit_button(label="Predecir Ventas") 
+            
+        if submit_button:
+            # recolar los inputs en un diccionario
+            input_data = {
+                "platform":platform, 
+                "genre": genre, 
+                "rating_esrb": rating_esrb, 
+                "gen_platform": gen_platform, 
+                "classification_user_score": classification_user_score, 
+                "year_of_release": year_of_release, 
+                "user_score": user_score, 
+                "critic_score": critic_score 
+            }
+            
+            try: 
+                response = requests.post(API_URL_PREDICT, json=input_data)
+                
+                response.raise_for_status()
+                
+                resultado = response.json()
+                
+                if "prediccion_ventas_globales_millones" in resultado:
+                    prediccion_valor = resultado["prediccion_ventas_globales_millones"]
+                    
+                    with col_resultado:
+                        st.subheader("Resultado de la Predicción")
+                        st.metric(
+                            label="Ventas Globales Predichas", 
+                            value=f"$ {prediccion_valor:,.2f} Millones"
+                        )
+                        st.success("Predicción realizada vía API!")
+                else:
+                    with col_resultado:
+                        st.error(f"Error en la respuesta de la API: {resultado.get("error", "Formato desconocido")}")
+            
+            except requests.exceptions.RequestException as e:
+                with col_resultado:
+                    st.error(f"Error de conexión con la API de ML: {e}")
